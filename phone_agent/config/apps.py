@@ -185,6 +185,8 @@ APP_PACKAGES: dict[str, str] = {
     "wechat": "com.tencent.mm",
     "Whatsapp": "com.whatsapp",
     "WhatsApp": "com.whatsapp",
+    "Calendar": "com.google.android.calendar",
+    "Booking": "com.booking",
 }
 
 

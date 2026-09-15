@@ -14,10 +14,12 @@ class ModelConfig:
     base_url: str = "http://localhost:8000/v1"
     api_key: str = "EMPTY"
     model_name: str = "autoglm-phone-9b"
-    max_tokens: int = 3000
-    temperature: float = 0.0
-    top_p: float = 0.85
+    max_tokens: int = 2048
+    temperature: float = 1.0
+    do_sample: bool = True
+    top_p: float = 0.90
     frequency_penalty: float = 0.2
+    logprobs: bool = True
     extra_body: dict[str, Any] = field(default_factory=dict)
 
 
@@ -27,6 +29,9 @@ class ModelResponse:
 
     thinking: str
     action: str
+    log_probs: list[dict[str, Any]]
+    prompt_tokens: int | None
+    completion_tokens: int | None
     raw_content: str
 
 
@@ -61,17 +66,40 @@ class ModelClient:
             max_tokens=self.config.max_tokens,
             temperature=self.config.temperature,
             top_p=self.config.top_p,
+            logprobs=self.config.logprobs,
             frequency_penalty=self.config.frequency_penalty,
             extra_body=self.config.extra_body,
             stream=False,
         )
 
         raw_content = response.choices[0].message.content
-
+        log_probs = response.choices[0].logprobs
+        prompt_tokens = response.usage.prompt_tokens if hasattr(response.usage, "prompt_tokens") else 0
+        completion_tokens = response.usage.completion_tokens if hasattr(response.usage, "completion_tokens") else 0
+        extracted_token_probs = []
+        if hasattr(log_probs, "content"):
+            for item in log_probs.content:
+                extracted_token_probs.append({
+                    "token": item.token,
+                    "log_prob": item.logprob
+                })
+        else:
+            print("Logprobs content not found in the response.")
         # Parse thinking and action from response
         thinking, action = self._parse_response(raw_content)
+        # start_idx = 0
+        # for idx, token_info in enumerate(extracted_token_probs):
+        #     if token_info["token"] in action.strip():
+        #         start_idx = idx
+        #         break
 
-        return ModelResponse(thinking=thinking, action=action, raw_content=raw_content)
+        return ModelResponse(thinking=thinking, 
+                             action=action, 
+                             log_probs=extracted_token_probs, 
+                             raw_content=raw_content,
+                             prompt_tokens=prompt_tokens,
+                             completion_tokens=completion_tokens
+                             )
 
     def _parse_response(self, content: str) -> tuple[str, str]:
         """

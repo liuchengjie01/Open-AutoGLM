@@ -18,18 +18,30 @@ def type_text(text: str, device_id: str | None = None) -> None:
         See: https://github.com/nicnocquee/AdbKeyboard
     """
     adb_prefix = _get_adb_prefix(device_id)
-    encoded_text = base64.b64encode(text.encode("utf-8")).decode("utf-8")
+    encoded_text = text.replace(" ", "\\ ")  # Replace spaces with \\ for ADB input command
+    # encoded_text = base64.b64encode(text.encode("utf-8")).decode("utf-8")
 
+    # subprocess.run(
+    #     adb_prefix
+    #     + [
+    #         "shell",
+    #         "am",
+    #         "broadcast",
+    #         "-a",
+    #         "ADB_INPUT_B64",
+    #         "--es",
+    #         "msg",
+    #         encoded_text,
+    #     ],
+    #     capture_output=True,
+    #     text=True,
+    # )
     subprocess.run(
         adb_prefix
         + [
             "shell",
-            "am",
-            "broadcast",
-            "-a",
-            "ADB_INPUT_B64",
-            "--es",
-            "msg",
+            "input",
+            "text",
             encoded_text,
         ],
         capture_output=True,

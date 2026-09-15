@@ -19,12 +19,12 @@ def get_current_app(device_id: str | None = None) -> str:
         The app name if recognized, otherwise "System Home".
     """
     adb_prefix = _get_adb_prefix(device_id)
-
     result = subprocess.run(
         adb_prefix + ["shell", "dumpsys", "window"], capture_output=True, text=True
     )
     output = result.stdout
-
+    if output is None:
+        return "System Home"
     # Parse window focus info
     for line in output.split("\n"):
         if "mCurrentFocus" in line or "mFocusedApp" in line:

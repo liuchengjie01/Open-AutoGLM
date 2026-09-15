@@ -22,7 +22,7 @@ class Screenshot:
     is_sensitive: bool = False
 
 
-def get_screenshot(device_id: str | None = None, timeout: int = 10) -> Screenshot:
+def get_screenshot(target_path: str | None = None, device_id: str | None = None, timeout: int = 10) -> Screenshot:
     """
     Capture a screenshot from the connected Android device.
 
@@ -68,13 +68,16 @@ def get_screenshot(device_id: str | None = None, timeout: int = 10) -> Screensho
         # Read and encode image
         img = Image.open(temp_path)
         width, height = img.size
-
+        if target_path:
+            if img.mode != "RGB":
+                img = img.convert("RGB")
+            img.save(target_path, format="JPEG")
         buffered = BytesIO()
         img.save(buffered, format="PNG")
         base64_data = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
         # Cleanup
-        os.remove(temp_path)
+        # os.remove(temp_path)
 
         return Screenshot(
             base64_data=base64_data, width=width, height=height, is_sensitive=False
