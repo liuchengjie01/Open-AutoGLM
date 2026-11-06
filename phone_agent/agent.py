@@ -1,4 +1,5 @@
 """Main PhoneAgent class for orchestrating phone automation."""
+import copy
 from datetime import datetime
 import os
 import re
@@ -6,7 +7,7 @@ import json
 import time
 import traceback
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from phone_agent.actions import ActionHandler
@@ -26,10 +27,11 @@ class AgentConfig:
     lang: str = "cn"
     system_prompt: str | None = None
     verbose: bool = True
+    model_name: str = ""
 
     def __post_init__(self):
         if self.system_prompt is None:
-            self.system_prompt = get_system_prompt(self.lang)
+            self.system_prompt = get_system_prompt(self.lang, self.model_name)
 
 
 @dataclass
@@ -39,15 +41,16 @@ class StepResult:
     success: bool
     finished: bool
     action: dict[str, Any] | None
-    original_action: str | None = None
-    raw_content: str | None = None
+    original_action: str | None = ""
+    raw_content: str | None = ""
     thinking: str | None = None
     message: str | None = None
-    log_probs: list[dict[str, Any]] | None = None
+    log_probs: list[dict[str, Any]] | None = field(default_factory=list)
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     package_name: str | None = None
     activity_name: str | None = None
+    log_user_prompt: list[dict[str, Any]] | None = None
 
 
 def get_package_activity(device_id):
@@ -80,119 +83,14 @@ def get_package_activity(device_id):
         print(f"ADB 执行失败: {e}")
     return "", ""
 
-def compute_avg_log_prob(s, logprobs_content, action_str=None) -> float:
-    """
-    最简单实用的方法：通过字符串查找 + 字符位置映射
-    """
-    import re
-    
-    # 1. 找 action
-    action_pattern = r'do\(action="[^"]*",\s*element=\[[^\]]*\]\)'
-    # 定义所有支持的 action 模式
-    if action_str is not None:
-        action_text = action_str
-        action_start = s.find(action_text)
-        if action_start == -1:
-            return 0.0
-        action_end = action_start + len(action_text)
-    else:
-        action_patterns = [
-            # do(action="Tap", element=[x,y])
-            r'do\(action="Tap",\s*element=\[[\d\s,]+\]\)',
-            
-            # do(action="Type", text="...")
-            r'do\(action="Type",\s*text="[^"]*"\)',
-            
-            # do(action="Swipe", start=[x1,y1], end=[x2,y2])
-            r'do\(action="Swipe",\s*start=\[[\d\s,]+\],\s*end=\[[\d\s,]+\]\)',
-            
-            # do(action="Long Press", element=[x,y])
-            r'do\(action="Long Press",\s*element=\[[\d\s,]+\]\)',
-            
-            # do(action="Launch", app="...")
-            r'do\(action="Launch",\s*app="[^"]*"\)',
-            
-            # do(action="Back")
-            r'do\(action="Back"\)',
-            
-            # finish(message="...")
-            r'finish\(message="[^"]*"\)',
-            
-            # 通用匹配（兜底）：do(...) 或 finish(...)
-            r'(?:do|finish)\([^)]*\)',
-        ]
-
-        match = None
-        for pattern in action_patterns:
-            match = re.search(pattern, s)
-            if match:
-                break
-        if not match:
-            return 0.0
-        
-        action_text = match.group(0)
-        action_start = match.start()
-        action_end = match.end()
-    
-    # 2. 获取 tokens
-    tokens = [item["token"] for item in logprobs_content]
-    # assert ''.join(tokens) == s, "Tokens do not match the original string"
-    logprobs = [item["log_prob"] for item in logprobs_content]
-    
-    # 3. 使用字符累积找到 token 范围
-    special_tokens = {"<think>", "</think>", "<answer>", "</answer>"}
-    current_pos = action_start
-    start_idx = None
-    end_idx = None
-    
-    for i, token in enumerate(tokens):
-        # 跳过特殊 token（如果有）
-        if token in special_tokens:
-            continue
-        
-        # 找到当前 token 在 s 中的位置
-        # 从 current_pos 开始找
-        pos = s.find(token, current_pos)
-        if pos == -1:
-            continue
-            # 如果找不到（可能是空格被重新组合），尝试去掉空格
-            # token_stripped = token.strip()
-            # if token_stripped and token_stripped != token:
-            #     pos = s.find(token_stripped, current_pos)
-            #     if pos != -1:
-            #         # 找到的是简化版，需要修正
-            #         # 简单处理：使用 current_pos
-            #         pos = current_pos
-            #     else:
-                    # pos = current_pos
-        
-        token_end = pos + len(token)
-        current_pos = token_end
-        
-        # 检查 token 是否与 action 区域相交
-        if pos < action_end and token_end > action_start:
-            if start_idx is None:
-                start_idx = i
-            end_idx = i + 1
-    
-    if start_idx is None:
-        return 0.0
-    log_probs_result = logprobs[start_idx:end_idx]
-    hit_actions = tokens[start_idx:end_idx]
-    print(f"Action tokens: {hit_actions}")
-    """Compute the average log probability from a list of token log probabilities."""
-    if len(log_probs_result) == 0:
-        return 0.0
-    total_log_prob = sum(log_probs_result)
-    return total_log_prob / len(log_probs_result)
-
 def compute_avg_log_prob_v2(s, logprobs_content, action_str=None) -> float:
     """
     计算 action 部分的平均 log probability
     直接基于 token 序列定位，不依赖 s.find()
     """
     import re
-    
+    if len(logprobs_content) == 0:
+        return 0.0
     # 1. 获取 tokens
     tokens = [item["token"] for item in logprobs_content]
     logprobs = [item["log_prob"] for item in logprobs_content]
@@ -314,7 +212,9 @@ class PhoneAgent:
                         "log_prob_avg": compute_avg_log_prob_v2(result.raw_content, result.log_probs, result.original_action.strip()),
                         "package": package,
                         "activity": activity,
-                        "action": result.original_action.strip()
+                        "action": result.original_action.strip(),
+                        "response": result.raw_content,
+                        "messages": result.log_user_prompt
                     }
         task_id = self.save_dir.split(os.sep)[-2]  # 获取当前任务的唯一标识符
         if os.path.exists(os.path.join("signal_files", f'{task_id}.txt')):
@@ -329,7 +229,8 @@ class PhoneAgent:
             start_tick = time.time()
             package, activity = get_package_activity(self.agent_config.device_id)
             result = self._execute_step(is_first=False, idx=idx)
-
+            
+            
             # compute log probabilities for the last step
             step_info = {
                 "step": self._step_count,
@@ -339,11 +240,16 @@ class PhoneAgent:
                 "log_prob_avg": compute_avg_log_prob_v2(result.raw_content, result.log_probs, result.original_action.strip()),
                 "package": package,
                 "activity": activity,
-                "action": result.original_action.strip()
+                "action": result.original_action.strip(),
+                "messages": result.log_user_prompt,
+                "response": result.raw_content
             }
             if os.path.exists(os.path.join("signal_files", f'{task_id}.txt')):
                 os.remove(os.path.join("signal_files", f'{task_id}.txt'))
                 step_info['is_attack'] = True
+            if result.success:
+                step_info['task_completed'] = True
+            
             log_data.append(step_info)
             
             if result.finished:
@@ -352,7 +258,7 @@ class PhoneAgent:
                 with open(os.path.join(self.save_dir, f"{idx}.json"), "w", encoding="utf-8") as f:
                     json.dump(log_data, f, ensure_ascii=False, indent=2)
                 return result.message or "Task completed"
-        print(log_data)
+        # print(log_data)
         with open(os.path.join(self.save_dir, f"{idx}.json"), "w", encoding="utf-8") as f:
             json.dump(log_data, f, ensure_ascii=False, indent=2)
         return "Max steps reached"
@@ -406,6 +312,7 @@ class PhoneAgent:
                     text=text_content, image_base64=screenshot.base64_data
                 )
             )
+            log_user_prompt = copy.deepcopy(self._context[-2:])
         else:
             screen_info = MessageBuilder.build_screen_info(current_app)
             text_content = f"** Screen Info **\n\n{screen_info}"
@@ -415,7 +322,7 @@ class PhoneAgent:
                     text=text_content, image_base64=screenshot.base64_data
                 )
             )
-
+            log_user_prompt = copy.deepcopy([self._context[-1]])
         # Get model response
         try:
             response = self.model_client.request(self._context)
@@ -429,7 +336,7 @@ class PhoneAgent:
                 thinking="",
                 raw_content="",
                 message=f"Model error: {e}",
-                log_probs=response.log_probs,
+                log_probs=[]
             )
 
         # Parse action from response
@@ -496,7 +403,8 @@ class PhoneAgent:
             message=result.message or action.get("message"),
             log_probs=response.log_probs,
             prompt_tokens=response.prompt_tokens,
-            completion_tokens=response.completion_tokens
+            completion_tokens=response.completion_tokens,
+            log_user_prompt=log_user_prompt
         )
 
     @property

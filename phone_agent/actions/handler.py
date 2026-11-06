@@ -119,6 +119,7 @@ class ActionHandler:
         self, element: list[int], screen_width: int, screen_height: int
     ) -> tuple[int, int]:
         """Convert relative coordinates (0-1000) to absolute pixels."""
+        return element[0], element[1]
         x = int(element[0] / 1000 * screen_width)
         y = int(element[1] / 1000 * screen_height)
         return x, y
@@ -141,7 +142,7 @@ class ActionHandler:
             return ActionResult(False, False, "No element coordinates")
 
         x, y = self._convert_relative_to_absolute(element, width, height)
-
+        print(f"======>  Tapping at ({x}, {y})")
         # Check for sensitive operation
         if "message" in action:
             if not self.confirmation_callback(action["message"]):

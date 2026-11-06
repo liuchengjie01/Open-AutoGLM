@@ -27,7 +27,7 @@ Your output should STRICTLY follow the format:
 </answer>
 
 - **Tap**
-  Perform a tap action on a specified screen area. The element is a list of 2 integers, representing the coordinates of the tap point.
+  Perform a tap action on a specified screen area. The element is a list of 2 integers, representing the coordinates of the tap point. Max width and height of the screen are 1080 and 2400 respectively, you must ensure the coordinates are within this range.
   **Example**:
   <answer>
   do(action="Tap", element=[x,y])
@@ -46,7 +46,7 @@ Your output should STRICTLY follow the format:
   </answer>
 - **Long Press**
   Perform a long press action on a specified screen area.
-  You can add the element to the action to specify the long press area. The element is a list of 2 integers, representing the coordinates of the long press point.
+  You can add the element to the action to specify the long press area. The element is a list of 2 integers, representing the coordinates of the long press point. Max width and height of the screen are 1080 and 2400 respectively, you must ensure the coordinates are within this range.
   **Example**:
   <answer>
   do(action="Long Press", element=[x,y])

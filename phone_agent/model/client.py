@@ -20,6 +20,7 @@ class ModelConfig:
     top_p: float = 0.90
     frequency_penalty: float = 0.2
     logprobs: bool = True
+    local: bool = True
     extra_body: dict[str, Any] = field(default_factory=dict)
 
 
@@ -59,18 +60,31 @@ class ModelClient:
 
         Raises:
             ValueError: If the response cannot be parsed.
+                        logprobs=self.config.logprobs,
         """
-        response = self.client.chat.completions.create(
-            messages=messages,
-            model=self.config.model_name,
-            max_tokens=self.config.max_tokens,
-            temperature=self.config.temperature,
-            top_p=self.config.top_p,
-            logprobs=self.config.logprobs,
-            frequency_penalty=self.config.frequency_penalty,
-            extra_body=self.config.extra_body,
-            stream=False,
-        )
+        if self.config.local:
+            response = self.client.chat.completions.create(
+                messages=messages,
+                model=self.config.model_name,
+                max_tokens=self.config.max_tokens,
+                temperature=self.config.temperature,
+                logprobs=self.config.logprobs,
+                top_p=self.config.top_p,
+                frequency_penalty=self.config.frequency_penalty,
+                extra_body=self.config.extra_body,
+                stream=False,
+            )
+        else:
+            response = self.client.chat.completions.create(
+                messages=messages,
+                model=self.config.model_name,
+                max_tokens=self.config.max_tokens,
+                temperature=self.config.temperature,
+                top_p=self.config.top_p,
+                frequency_penalty=self.config.frequency_penalty,
+                extra_body=self.config.extra_body,
+                stream=False,
+            )
 
         raw_content = response.choices[0].message.content
         log_probs = response.choices[0].logprobs
@@ -119,6 +133,11 @@ class ModelClient:
         Returns:
             Tuple of (thinking, action).
         """
+        if "<answer>" in content:
+            parts = content.split("<answer>", 1)
+            thinking = parts[0].replace("<think>", "").replace("</think>", "").strip()
+            action = parts[1].replace("</answer>", "").strip()
+            return thinking, action
         # Rule 1: Check for finish(message=
         if "finish(message=" in content:
             parts = content.split("finish(message=", 1)
@@ -134,11 +153,7 @@ class ModelClient:
             return thinking, action
 
         # Rule 3: Fallback to legacy XML tag parsing
-        if "<answer>" in content:
-            parts = content.split("<answer>", 1)
-            thinking = parts[0].replace("<think>", "").replace("</think>", "").strip()
-            action = parts[1].replace("</answer>", "").strip()
-            return thinking, action
+        
 
         # Rule 4: No markers found, return content as action
         return "", content

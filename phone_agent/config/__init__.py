@@ -4,9 +4,10 @@ from phone_agent.config.apps import APP_PACKAGES
 from phone_agent.config.i18n import get_message, get_messages
 from phone_agent.config.prompts_en import SYSTEM_PROMPT as SYSTEM_PROMPT_EN
 from phone_agent.config.prompts_zh import SYSTEM_PROMPT as SYSTEM_PROMPT_ZH
+from phone_agent.config.prompts_en_mai import MAI_MOBILE_SYS_PROMPT as SYSTEM_PROMPT_EN_MAI
 
 
-def get_system_prompt(lang: str = "cn") -> str:
+def get_system_prompt(lang: str = "cn", model_name: str = "autoglm-phone-9b") -> str:
     """
     Get system prompt by language.
 
@@ -16,8 +17,10 @@ def get_system_prompt(lang: str = "cn") -> str:
     Returns:
         System prompt string.
     """
-    if lang == "en":
+    if lang == "en" and model_name == "autoglm-phone-9b":
         return SYSTEM_PROMPT_EN
+    if lang == "en" and model_name == "mai-ui-8b":
+        return SYSTEM_PROMPT_EN_MAI
     return SYSTEM_PROMPT_ZH
 
 

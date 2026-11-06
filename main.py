@@ -433,6 +433,13 @@ Examples:
     )
 
     parser.add_argument(
+        "--is-local",
+        action='store_true',
+        default=False,
+        help='If use local deployment model'
+    )
+    
+    parser.add_argument(
         "task",
         nargs="?",
         type=str,
@@ -540,6 +547,7 @@ def main():
         base_url=args.base_url,
         model_name=args.model,
         api_key=args.apikey,
+        local=args.is_local,
     )
 
     agent_config = AgentConfig(
@@ -547,10 +555,11 @@ def main():
         device_id=args.device_id,
         verbose=not args.quiet,
         lang=args.lang,
+        model_name=args.model
     )
 
     hook_cfg_config = load_hook_configuration()
-    datasets = load_dataset(f"datasets{os.sep}GhostEI.jsonl")
+    datasets = load_dataset(f"datasets{os.sep}GhostEI_extend.jsonl")
 
     # Create agent
     agent = PhoneAgent(
@@ -578,7 +587,7 @@ def main():
 
     # Run with provided task or enter interactive mode
     hook: Optional[ForegroundAppHook] = None
-    hit_ids = [31]
+    hit_ids = [10,11,12,13,14,15,16,17,18,19] #
     subprocess.run(["adb", "emu", "avd", "snapshot", "save", "0"], shell=True)
     time.sleep(5)
     for data in datasets:
@@ -591,13 +600,13 @@ def main():
             
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             if not args.is_attack:
-                target_dir = os.path.join("benign_logs", str(args.task_id), str(timestamp))
+                target_dir = os.path.join("benign_logs", args.model, str(args.task_id), str(timestamp))
             else:
-                target_dir = os.path.join("logs", str(args.task_id), str(timestamp))
+                target_dir = os.path.join("logs", args.model, str(args.task_id), str(timestamp))
             os.makedirs(target_dir, exist_ok=True)
             agent.save_dir = target_dir
             for i in range(args.num_rollouts):
-                print(f"--- Rollout {i + 1}/{args.num_rollouts} ---")
+                print(f"--- Task ID: {args.task_id}, Rollout {i + 1}/{args.num_rollouts} ---")
                 subprocess.run(["adb", "emu", "avd", "snapshot", "load", "0"], shell=True)
                 time.sleep(3.0)
                 hook, httpd = None, None

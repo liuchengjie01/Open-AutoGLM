@@ -100,7 +100,7 @@ model_config = ModelConfig(
 agent_config = AgentConfig(
     max_steps=15,
     lang="en",
-    system_prompt=
+    system_prompt=""
 )
 
 # 创建 Agent
