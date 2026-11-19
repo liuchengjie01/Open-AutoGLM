@@ -217,6 +217,20 @@ def launch_app(app_name: str, device_id: str | None = None, delay: float = 1.0) 
     return True
 
 
+def enter(device_id: str | None = None, delay: float = 1.0):
+    adb_prefix = _get_adb_prefix(device_id)
+    subprocess.run(
+            adb_prefix + ["shell", "input", "keyevent", "KEYCODE_ENTER"], capture_output=True
+        )
+    time.sleep(delay)
+
+def menu(device_id: str | None = None, delay: float = 1.0):
+    adb_prefix = _get_adb_prefix(device_id)
+    subprocess.run(
+            adb_prefix + ["shell", "input", "keyevent", "KEYCODE_MENU"], capture_output=True
+        )
+    time.sleep(delay)
+
 def _get_adb_prefix(device_id: str | None) -> list:
     """Get ADB command prefix with optional device specifier."""
     if device_id:

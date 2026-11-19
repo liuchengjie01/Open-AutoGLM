@@ -17,9 +17,9 @@ def get_system_prompt(lang: str = "cn", model_name: str = "autoglm-phone-9b") ->
     Returns:
         System prompt string.
     """
-    if lang == "en" and model_name == "autoglm-phone-9b":
+    if lang == "en" and model_name in ["autoglm-phone-9b", "gpt-6.1-sol", "gpt-6-astra"]:
         return SYSTEM_PROMPT_EN
-    if lang == "en" and model_name == "mai-ui-8b":
+    if lang == "en" and model_name in ["mai-ui-8b", "gpt-6.1-sol", "gpt-6-astra"]:
         return SYSTEM_PROMPT_EN_MAI
     return SYSTEM_PROMPT_ZH
 

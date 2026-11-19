@@ -83,7 +83,7 @@ def get_package_activity(device_id):
         print(f"ADB 执行失败: {e}")
     return "", ""
 
-def compute_avg_log_prob_v2(s, logprobs_content, action_str=None) -> float:
+def compute_avg_log_prob_v2(logprobs_content) -> float:
     """
     计算 action 部分的平均 log probability
     直接基于 token 序列定位，不依赖 s.find()
@@ -209,8 +209,8 @@ class PhoneAgent:
                         "time_consumption": time.time() - start_tick,
                         "prompt_tokens": result.prompt_tokens,
                         "completion_tokens": result.completion_tokens,
-                        "log_prob_avg": compute_avg_log_prob_v2(result.raw_content, result.log_probs, result.original_action.strip()),
-                        "package": package,
+                        "log_prob_avg": compute_avg_log_prob_v2(result.log_probs),
+                        "package": package.replace("Sys2038:", ""),  # 清理包名中的特殊前缀
                         "activity": activity,
                         "action": result.original_action.strip(),
                         "response": result.raw_content,
@@ -237,8 +237,8 @@ class PhoneAgent:
                 "time_consumption": time.time() - start_tick,
                 "prompt_tokens": result.prompt_tokens,
                 "completion_tokens": result.completion_tokens,
-                "log_prob_avg": compute_avg_log_prob_v2(result.raw_content, result.log_probs, result.original_action.strip()),
-                "package": package,
+                "log_prob_avg": compute_avg_log_prob_v2(result.log_probs),
+                "package": package.replace("Sys2038:", ""),  # 清理包名中的特殊前缀
                 "activity": activity,
                 "action": result.original_action.strip(),
                 "messages": result.log_user_prompt,
@@ -324,21 +324,25 @@ class PhoneAgent:
             )
             log_user_prompt = copy.deepcopy([self._context[-1]])
         # Get model response
-        try:
-            response = self.model_client.request(self._context)
-        except Exception as e:
-            if self.agent_config.verbose:
-                traceback.print_exc()
+        max_retries = 0
+        while max_retries < 3:  # Retry up to 3 times
+            try:
+                response = self.model_client.request(self._context)
+                
+                break  # Exit loop if successful
+            except Exception as e:
+                max_retries += 1
+                pass
+        if max_retries == 3:
             return StepResult(
                 success=False,
                 finished=True,
                 action=None,
                 thinking="",
                 raw_content="",
-                message=f"Model error: {e}",
+                message="Model error: Max retries exceeded",
                 log_probs=[]
             )
-
         # Parse action from response
         try:
             action = parse_action(response.action)
@@ -396,8 +400,8 @@ class PhoneAgent:
         return StepResult(
             success=result.success,
             finished=finished,
-            action=action,
-            original_action=response.action,
+            action=str(action),
+            original_action=str(response.action),
             thinking=response.thinking,
             raw_content=response.raw_content,
             message=result.message or action.get("message"),
@@ -407,6 +411,21 @@ class PhoneAgent:
             log_user_prompt=log_user_prompt
         )
 
+    def reset_device_state(self):
+        """
+        在任务执行前后重置设备物理状态，避免上一任务残留页面/键盘干扰下一任务
+        """
+        try:
+            self.action_handler._handle_back({}, 0, 0)  # 尝试返回上一级页面
+            time.sleep(1.0)
+            self.action_handler._handle_back({}, 0, 0)  # 尝试返回上一级页面
+            time.sleep(1.0)
+            self.action_handler._handle_back({}, 0, 0)  # 尝试返回上一级页面
+            time.sleep(1.0)
+            self.action_handler._handle_home({}, 0, 0)  # 返回主屏幕
+            time.sleep(1.0)
+        except Exception as e:
+            print(f"[Device Reset Warning] Failed to reset device: {e}")
     @property
     def context(self) -> list[dict[str, Any]]:
         """Get the current conversation context."""

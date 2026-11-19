@@ -1,11 +1,18 @@
 """Model client for AI inference using OpenAI-compatible API."""
 
+import ast
 import json
 from dataclasses import dataclass, field
-from typing import Any
+import re
+from typing import Any, Dict
 
+from json_repair import repair_json
 from openai import OpenAI
 
+# Constants
+SCALE_FACTOR = 999
+WIDTH = 1080
+HEIGHT = 2400
 
 @dataclass
 class ModelConfig:
@@ -115,15 +122,22 @@ class ModelClient:
                              completion_tokens=completion_tokens
                              )
 
-    def _parse_response(self, content: str) -> tuple[str, str]:
+    def _parse_response(self, content: str):
+        
+        if self.config.model_name in ["autoglm-phone-9b", "gpt-6.1-sol", "gpt-6-astra"]:
+            return self._parse_autoglm_response(content)
+        if self.config.model_name in ["mai-ui-8b", "gpt-6.1-sol", "gpt-6-astra"]:
+            return self._parse_mai_ui_response(content)
+        
+    def _parse_autoglm_response(self, content: str):
         """
         Parse the model response into thinking and action parts.
 
         Parsing rules:
         1. If content contains 'finish(message=', everything before is thinking,
-           everything from 'finish(message=' onwards is action.
+            everything from 'finish(message=' onwards is action.
         2. If rule 1 doesn't apply but content contains 'do(action=',
-           everything before is thinking, everything from 'do(action=' onwards is action.
+            everything before is thinking, everything from 'do(action=' onwards is action.
         3. Fallback: If content contains '<answer>', use legacy parsing with XML tags.
         4. Otherwise, return empty thinking and full content as action.
 
@@ -151,14 +165,144 @@ class ModelClient:
             thinking = parts[0].strip()
             action = "do(action=" + parts[1]
             return thinking, action
-
-        # Rule 3: Fallback to legacy XML tag parsing
-        
-
-        # Rule 4: No markers found, return content as action
         return "", content
 
 
+    def parse_tagged_text(self, text: str) -> Dict[str, Any]:
+        """
+        Parse text containing XML-style tags to extract thinking and tool_call content.
+
+        Args:
+            text: Text containing <thinking> and <tool_call> tags.
+
+        Returns:
+            Dictionary with keys:
+                - "thinking": Content inside <thinking> tags (str or None)
+                - "tool_call": Parsed JSON content inside <tool_call> tags (dict or None)
+
+        Raises:
+            ValueError: If tool_call content is not valid JSON.
+        """
+        # Handle thinking model output format (uses </think> instead of </thinking>)
+        if "</think>" in text and "</thinking>" not in text:
+            text = text.replace("</think>", "</thinking>")
+            text = "<thinking>" + text
+        if "<answer>" in text and "</answer>" in text:
+            text = text.replace("<answer>", "<tool_call>")
+            text = text.replace("</answer>", "</tool_call>")
+        # Define regex pattern with non-greedy matching
+        pattern = r"<thinking>(.*?)</thinking>.*?<tool_call>(.*?)</tool_call>"
+
+        result: Dict[str, Any] = {
+            "thinking": None,
+            "tool_call": None,
+        }
+
+        # Use re.DOTALL to match newlines
+        match = re.search(pattern, text, re.DOTALL)
+        if match:
+            result = {
+                "thinking": match.group(1).strip().strip('"'),
+                "tool_call": match.group(2).strip().strip('"'),
+            }
+        else:
+            m = re.search(r"<tool_call>\s*(.*?)\s*</tool_call>", text, re.DOTALL)
+            tool_call_str = m.group(1) if m else None
+            if tool_call_str:
+                result["tool_call"] = tool_call_str.strip().strip('"')
+                result["thinking"] = "No thinking content found."
+
+        # Parse tool_call as JSON
+        if result["tool_call"]:
+            try:
+                result["tool_call"] = repair_json(result["tool_call"], return_objects=False)
+                result["tool_call"] = json.loads(result["tool_call"])
+            except Exception as e:
+                result["tool_call"] = ast.literal_eval(result["tool_call"])
+                assert isinstance(result["tool_call"], dict)
+                pass
+
+        return result
+
+    
+    def _parse_mai_ui_response(self, text: str):
+        """
+            Parse model output text into structured action format.
+
+            Args:
+                text: Raw model output containing thinking and tool_call tags.
+
+            Returns:
+                Dictionary with keys:
+                    - "thinking": The model's reasoning process
+                    - "action_json": Parsed action with normalized coordinates
+
+            Note:
+                Coordinates are normalized to [0, 1] range by dividing by SCALE_FACTOR.
+        """
+        text = text.strip()
+
+        results = self.parse_tagged_text(text)
+        thinking = results["thinking"]
+        tool_call = results["tool_call"]
+        if not tool_call:
+            raise ValueError("Invalid tool_call format: missing 'name' or 'arguments'")
+        if "arguments" in tool_call:
+            action = tool_call["arguments"]
+        elif "action" in tool_call:
+            action = tool_call
+
+        # Normalize coordinates from SCALE_FACTOR range to [0, 1]
+        if "coordinate" in action:
+            coordinates = action["coordinate"]
+            if len(coordinates) == 2:
+                point_x, point_y = coordinates
+            elif len(coordinates) == 4:
+                x1, y1, x2, y2 = coordinates
+                point_x = (x1 + x2) / 2
+                point_y = (y1 + y2) / 2
+            else:
+                raise ValueError(
+                    f"Invalid coordinate format: expected 2 or 4 values, got {len(coordinates)}"
+                )
+            point_x = point_x / SCALE_FACTOR * WIDTH
+            point_y = point_y / SCALE_FACTOR * HEIGHT
+            action["coordinate"] = [point_x, point_y]
+        
+        if "start_coordinate" in action:
+            coordinates = action["start_coordinate"]
+            if len(coordinates) == 2:
+                point_x, point_y = coordinates
+            elif len(coordinates) == 4:
+                x1, y1, x2, y2 = coordinates
+                point_x = (x1 + x2) / 2
+                point_y = (y1 + y2) / 2
+            else:
+                raise ValueError(
+                    f"Invalid coordinate format: expected 2 or 4 values, got {len(coordinates)}"
+                )
+            point_x = point_x / SCALE_FACTOR * WIDTH
+            point_y = point_y / SCALE_FACTOR * HEIGHT
+            action["start_coordinate"] = [point_x, point_y]
+        
+        if "end_coordinate" in action:
+            coordinates = action["end_coordinate"]
+            if len(coordinates) == 2:
+                point_x, point_y = coordinates
+            elif len(coordinates) == 4:
+                x1, y1, x2, y2 = coordinates
+                point_x = (x1 + x2) / 2
+                point_y = (y1 + y2) / 2
+            else:
+                raise ValueError(
+                    f"Invalid coordinate format: expected 2 or 4 values, got {len(coordinates)}"
+                )
+            point_x = point_x / SCALE_FACTOR * WIDTH
+            point_y = point_y / SCALE_FACTOR * HEIGHT
+            action["end_coordinate"] = [point_x, point_y]
+
+        return thinking, action
+    
 class MessageBuilder:
     """Helper class for building conversation messages."""
 

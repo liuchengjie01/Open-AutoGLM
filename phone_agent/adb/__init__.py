@@ -16,6 +16,8 @@ from phone_agent.adb.device import (
     long_press,
     swipe,
     tap,
+    enter,
+    menu,
 )
 from phone_agent.adb.input import (
     clear_text,
